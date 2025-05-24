@@ -7,6 +7,12 @@ let isAdminControlled = false;
 let selectedQuizId = null;
 let isDirectTestMode = false;
 let isTestEnded = false;
+let userAnswers = null; // Lưu đáp án người dùng
+let answerKey = null; // Lưu đáp án đúng
+let currentAnswerPart = 1; // Phần hiện tại trong màn hình đáp án
+const answerScreen = document.getElementById("answer-screen");
+const answerNotification = document.getElementById("answer-notification");
+const answerImageDisplay = document.getElementById("answer-image-display");
 const welcomeScreen = document.getElementById("welcome-screen");
 const adminLogin = document.getElementById("admin-login");
 const studentLogin = document.getElementById("student-login");
@@ -50,6 +56,125 @@ let currentAdminStep = 0;
 let currentQuizPart = 0;
 const partAnswerCounts = [6, 25, 39, 30, 30, 16, 54];
 
+function showResultScreen() {
+  hideAllScreens();
+  resultScreen.classList.remove("hidden");
+}
+
+// Hàm hiển thị màn hình đáp án
+async function showAnswerScreen() {
+  if (!userAnswers || !answerKey) {
+    answerNotification.innerText = "Không thể hiển thị đáp án. Dữ liệu không đầy đủ.";
+    return;
+  }
+
+  hideAllScreens();
+  answerScreen.classList.remove("hidden");
+  answerNotification.innerText = ""; // Xóa thông báo lỗi nếu có
+  currentAnswerPart = 1;
+
+  await loadAnswerImages();
+  await loadAnswerQuestions();
+  updateAnswerPartVisibility();
+}
+
+// Hàm tải hình ảnh cho màn hình đáp án
+async function loadAnswerImages() {
+  answerImageDisplay.innerHTML = "";
+  for (let part = 1; part <= 7; part++) {
+    const res = await fetch(`/images?part=${part}`);
+    const images = await res.json();
+    const section = document.createElement("div");
+    section.id = `answer-images-part${part}`;
+    section.className = part === 1 ? "" : "hidden";
+    section.innerHTML = `<h3 class="text-lg font-semibold mb-2">Part ${part}</h3>`;
+    images.forEach((img) => {
+      const imgElement = document.createElement("img");
+      imgElement.src = img;
+      imgElement.alt = `Image for Part ${part}`;
+      section.appendChild(imgElement);
+    });
+    answerImageDisplay.appendChild(section);
+  }
+}
+
+// Hàm tải câu hỏi và đáp án
+async function loadAnswerQuestions() {
+  const questionSection = document.getElementById("answer-question-section");
+  questionSection.innerHTML = "";
+
+  const totalQuestions = Object.keys(answerKey).length;
+  const questionsPerPart = Math.ceil(totalQuestions / 7); // Chia đều cho 7 phần
+
+  for (let part = 1; part <= 7; part++) {
+    const partDiv = document.createElement("div");
+    partDiv.id = `answer-part${part}`;
+    partDiv.className = part === 1 ? "" : "hidden";
+    partDiv.innerHTML = `<h2 class="text-2xl font-semibold mb-2">Part ${part}</h2>`;
+    const sectionDiv = document.createElement("div");
+    sectionDiv.id = `answer-section${part}`;
+    sectionDiv.className = "space-y-4";
+
+    const start = (part - 1) * questionsPerPart + 1;
+    const end = Math.min(part * questionsPerPart, totalQuestions);
+
+    let correctCount = 0;
+    for (let i = start; i <= end; i++) {
+      const questionDiv = document.createElement("div");
+      questionDiv.className = "p-2 rounded";
+      const userAnswer = userAnswers[`q${i}`];
+      const correctAnswer = answerKey[`q${i}`];
+
+      const isCorrect = userAnswer === correctAnswer;
+      if (isCorrect) correctCount++;
+      questionDiv.classList.add(isCorrect ? "correct-answer" : "wrong-answer");
+
+      questionDiv.innerHTML = `
+        <p class="font-semibold">Câu ${i}: Đáp án của bạn: ${userAnswer || "Không chọn"}</p>
+        <p>Đáp án đúng: ${correctAnswer}</p>
+      `;
+      sectionDiv.appendChild(questionDiv);
+    }
+    partDiv.innerHTML += `<p class="text-sm text-gray-600 mt-2">Số câu đúng: ${correctCount}/${end - start + 1}</p>`;
+    partDiv.appendChild(sectionDiv);
+    questionSection.appendChild(partDiv);
+  }
+
+  const navDiv = document.createElement("div");
+  navDiv.className = "flex space-x-4 sticky bottom-0 bg-gray-100 p-4";
+  navDiv.innerHTML = `
+    <button type="button" onclick="prevAnswerPart(currentAnswerPart + 1)" class="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600">Phần trước</button>
+    <button type="button" onclick="nextAnswerPart(currentAnswerPart + 1)" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">Phần tiếp theo</button>
+    <button onclick="showResultScreen()" class="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600">Quay lại</button>
+  `;
+  questionSection.appendChild(navDiv);
+}
+
+// Hàm điều chỉnh hiển thị phần đáp án
+function updateAnswerPartVisibility() {
+  for (let i = 1; i <= 7; i++) {
+    document.getElementById(`answer-part${i}`).classList.toggle("hidden", i !== currentAnswerPart);
+    document.getElementById(`answer-images-part${i}`).classList.toggle("hidden", i !== currentAnswerPart);
+    document.querySelector(`#answer-image-display h3`).innerText = `Part ${currentAnswerPart}`;
+  }
+}
+
+// Hàm chuyển đến phần trước
+function prevAnswerPart(current) {
+  if (currentAnswerPart > 1) {
+    currentAnswerPart--;
+    updateAnswerPartVisibility();
+  }
+}
+
+// Hàm chuyển đến phần tiếp theo
+function nextAnswerPart(current) {
+  if (currentAnswerPart < 7) {
+    currentAnswerPart++;
+    updateAnswerPartVisibility();
+  }
+}
+
 function saveAdminState() {
   if (isAdmin && user) {
     localStorage.setItem("adminState", JSON.stringify({
@@ -74,6 +199,7 @@ function getCurrentScreen() {
   if (!historyScreen.classList.contains("hidden")) return "history-screen";
   if (!quizContainer.classList.contains("hidden")) return "quiz-container";
   if (!resultScreen.classList.contains("hidden")) return "result-screen";
+  if (!answerScreen.classList.contains("hidden")) return "answer-screen"; // Thêm điều kiện cho answer-screen
   if (!document.getElementById("admin-step-audio").classList.contains("hidden")) return "admin-step-audio";
   for (let i = 1; i <= 7; i++) {
     if (!document.getElementById(`admin-step-part${i}`).classList.contains("hidden")) {
@@ -116,6 +242,13 @@ async function restoreAdminState() {
       } else if (state.screen === "history-screen") {
         historyScreen.classList.remove("hidden");
         await loadHistory();
+      } else if (state.screen === "answer-screen") { // Thêm điều kiện cho answer-screen
+        answerScreen.classList.remove("hidden");
+        // Khôi phục trạng thái nếu cần (ví dụ: hiển thị phần đáp án hiện tại)
+        currentAnswerPart = state.currentAnswerPart || 1;
+        await loadAnswerImages();
+        await loadAnswerQuestions();
+        updateAnswerPartVisibility();
       } else if (state.screen.startsWith("admin-step-")) {
         document.getElementById(state.screen).classList.remove("hidden");
       }
@@ -138,6 +271,7 @@ function hideAllScreens() {
   historyScreen.classList.add("hidden");
   quizContainer.classList.add("hidden");
   resultScreen.classList.add("hidden");
+  answerScreen.classList.add("hidden");
   document.querySelectorAll(".admin-step").forEach(step => step.classList.add("hidden"));
 }
 
@@ -402,24 +536,67 @@ async function uploadQuizzes() {
 }
 
 async function downloadQuizzes(quizId) {
+  const loadingModal = document.getElementById('loading-modal');
+  const progressBar = document.getElementById('progress-bar');
+  const progressText = document.getElementById('progress-text');
+
+  // Hiển thị modal
+  loadingModal.classList.remove('hidden');
+
   try {
-    const res = await fetch(`/download-quiz-zip/${quizId}`);
-    if (!res.ok) {
-      throw new Error(`HTTP error! Status: ${res.status}`);
-    }
-    const blob = await res.blob();
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `quiz_${quizId}.zip`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(url);
-    notification.innerText = "Đã tải xuống file ZIP chứa đề thi.";
+    const url = `/download-quiz-zip/${quizId}`;
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', url, true);
+    xhr.responseType = 'blob';
+
+    // Theo dõi tiến trình tải xuống
+    xhr.onprogress = function(event) {
+      if (event.lengthComputable) {
+        const percentComplete = (event.loaded / event.total) * 100;
+        progressBar.style.width = `${percentComplete}%`;
+        progressText.innerText = `${Math.round(percentComplete)}%`;
+      }
+    };
+
+    // Khi tải xong
+    xhr.onload = function() {
+      if (xhr.status === 200) {
+        const blob = xhr.response;
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = `quiz_${quizId}.zip`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(downloadUrl);
+
+        // Cập nhật thông báo
+        notification.innerText = "Đã tải xuống file ZIP chứa đề thi.";
+
+        // Ẩn modal sau khi tải xong
+        setTimeout(() => {
+          loadingModal.classList.add('hidden');
+          progressBar.style.width = '0%'; // Reset thanh tiến trình
+          progressText.innerText = '0%'; // Reset text
+        }, 1000); // Hiển thị thêm 1 giây trước khi ẩn
+      } else {
+        throw new Error(`HTTP error! Status: ${xhr.status}`);
+      }
+    };
+
+    // Xử lý lỗi
+    xhr.onerror = function() {
+      throw new Error('Network error occurred');
+    };
+
+    xhr.send();
   } catch (error) {
     console.error("Error downloading quiz:", error);
     notification.innerText = "Lỗi khi tải xuống file ZIP. Vui lòng thử lại.";
+    loadingModal.classList.add('hidden'); // Ẩn modal nếu có lỗi
+    progressBar.style.width = '0%'; // Reset thanh tiến trình
+    progressText.innerText = '0%'; // Reset text
   }
 }
 
@@ -958,14 +1135,14 @@ async function submitQuiz() {
   }
 
   const formData = new FormData(quizForm);
-  const answers = {};
-  formData.forEach((val, key) => answers[key] = val);
+  userAnswers = {};
+  formData.forEach((val, key) => (userAnswers[key] = val));
 
   try {
     const res = await fetch("/submit", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: user.name, answers }),
+      body: JSON.stringify({ username: user.name, answers: userAnswers }),
     });
 
     if (!res.ok) {
@@ -974,6 +1151,14 @@ async function submitQuiz() {
     }
 
     const result = await res.json();
+    
+    // Lấy đáp án đúng từ server
+    const answerRes = await fetch("/answer-key");
+    if (!answerRes.ok) {
+      throw new Error("Không thể lấy đáp án đúng");
+    }
+    answerKey = await answerRes.json();
+
     hideAllScreens();
     resultScreen.classList.remove("hidden");
     timerDisplay.classList.add("hidden");
